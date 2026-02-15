@@ -1,0 +1,17 @@
+version: '3.9'
+
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+    image: shinkansen:dev
+    # This is a build-only compose file.
+    # The binary is extracted from the image:
+    #   docker compose build
+    #   docker create --name tmp shinkansen:dev
+    #   docker cp tmp:/usr/local/bin/shinkansen ./shinkansen
+    #   docker rm tmp
+    entrypoint: ["echo", "Build complete. Extract binary with docker cp."]
