@@ -85,4 +85,9 @@ var (
 	searchPromptStyle = lipgloss.NewStyle().
 				Foreground(colorCTA).
 				Bold(true)
+
+	// Selection indicator
+	selectedCheckStyle = lipgloss.NewStyle().
+				Foreground(colorCTA).
+				Bold(true)
 )

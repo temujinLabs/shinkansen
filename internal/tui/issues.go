@@ -10,9 +10,9 @@ import (
 )
 
 type IssueList struct {
-	issues   []jira.Issue
-	cursor   int
-	offset   int
+	issues     []jira.Issue
+	cursor     int
+	offset     int
 	maxVisible int
 }
 
@@ -58,6 +58,12 @@ func (il IssueList) Update(msg tea.Msg, app *App) (IssueList, tea.Cmd) {
 				app.currentView = viewDetail
 			}
 		case "m":
+			// Bulk move if selections exist, otherwise single move
+			if app.selectionCount() > 0 {
+				for k := range app.selections {
+					return il, app.showTransitions(k)
+				}
+			}
 			if issue := il.SelectedIssue(); issue != nil {
 				return il, app.showTransitions(issue.Key)
 			}
@@ -67,6 +73,12 @@ func (il IssueList) Update(msg tea.Msg, app *App) (IssueList, tea.Cmd) {
 				app.detail.SetIssue(issue)
 				app.detail.StartComment()
 			}
+		case "t":
+			if issue := il.SelectedIssue(); issue != nil {
+				app.currentView = viewDetail
+				app.detail.SetIssue(issue)
+				app.detail.StartLogTime()
+			}
 		case "n":
 			app.currentView = viewSearch
 			app.search.StartCreate()
@@ -75,7 +87,7 @@ func (il IssueList) Update(msg tea.Msg, app *App) (IssueList, tea.Cmd) {
 	return il, nil
 }
 
-func (il IssueList) View(width, height int, active bool) string {
+func (il IssueList) View(width, height int, active bool, selections map[string]bool) string {
 	il.maxVisible = height - 4
 
 	title := panelTitleStyle.Render(fmt.Sprintf("My Issues (%d)", len(il.issues)))
@@ -84,17 +96,32 @@ func (il IssueList) View(width, height int, active bool) string {
 	end := min(il.offset+il.maxVisible, len(il.issues))
 	for i := il.offset; i < end; i++ {
 		issue := il.issues[i]
+
+		// Selection checkbox
+		check := "  "
+		if selections[issue.Key] {
+			check = selectedCheckStyle.Render("● ")
+		}
+
 		key := issueKeyStyle.Render(issue.Key)
 		summary := issue.Fields.Summary
-		if len(summary) > width-30 {
-			summary = summary[:width-33] + "..."
+		maxSumLen := width - 34
+		if maxSumLen < 10 {
+			maxSumLen = 10
+		}
+		if len(summary) > maxSumLen {
+			summary = summary[:maxSumLen-3] + "..."
 		}
 		status := issueStatusStyle.Render(issue.Fields.Status.Name)
 
-		line := fmt.Sprintf("%s %s %s", key, issueSummaryStyle.Render(summary), status)
+		line := fmt.Sprintf("%s%s %s %s", check, key, issueSummaryStyle.Render(summary), status)
 		if i == il.cursor {
+			selPrefix := "  "
+			if selections[issue.Key] {
+				selPrefix = "● "
+			}
 			line = selectedStyle.Width(width - 4).Render(
-				fmt.Sprintf("%-12s %s %14s", issue.Key, summary, issue.Fields.Status.Name),
+				fmt.Sprintf("%s%-12s %s %14s", selPrefix, issue.Key, summary, issue.Fields.Status.Name),
 			)
 		}
 		rows = append(rows, line)

@@ -16,6 +16,9 @@ type DetailView struct {
 	commenting  bool
 	commentBuf  string
 	commentSent bool
+	logging     bool   // true when in time logging mode
+	logBuf      string // time input buffer (e.g. "2h", "30m")
+	logSent     bool
 }
 
 func NewDetailView() DetailView {
@@ -27,6 +30,8 @@ func (dv *DetailView) SetIssue(issue *jira.Issue) {
 	dv.scrollY = 0
 	dv.commenting = false
 	dv.commentBuf = ""
+	dv.logging = false
+	dv.logBuf = ""
 }
 
 func (dv *DetailView) StartComment() {
@@ -34,9 +39,15 @@ func (dv *DetailView) StartComment() {
 	dv.commentBuf = ""
 }
 
+func (dv *DetailView) StartLogTime() {
+	dv.logging = true
+	dv.logBuf = ""
+}
+
 func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Comment input mode
 		if dv.commenting {
 			switch msg.String() {
 			case "enter":
@@ -48,7 +59,6 @@ func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 					dv.commentSent = true
 					return dv, func() tea.Msg {
 						app.client.AddComment(key, comment)
-						// Fetch the individual issue to get updated comments
 						issue, err := app.client.GetIssue(key)
 						if err == nil {
 							app.store.UpsertIssue(issue)
@@ -72,6 +82,38 @@ func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 			return dv, nil
 		}
 
+		// Time logging input mode
+		if dv.logging {
+			switch msg.String() {
+			case "enter":
+				if dv.logBuf != "" && dv.issue != nil {
+					timeSpent := dv.logBuf
+					key := dv.issue.Key
+					dv.logging = false
+					dv.logBuf = ""
+					dv.logSent = true
+					return dv, func() tea.Msg {
+						app.client.LogWork(key, timeSpent)
+						return logWorkDoneMsg{issueKey: key}
+					}
+				}
+				dv.logging = false
+			case "esc":
+				dv.logging = false
+				dv.logBuf = ""
+			case "backspace":
+				if len(dv.logBuf) > 0 {
+					dv.logBuf = dv.logBuf[:len(dv.logBuf)-1]
+				}
+			default:
+				if len(msg.String()) == 1 || msg.String() == " " {
+					dv.logBuf += msg.String()
+				}
+			}
+			return dv, nil
+		}
+
+		// Normal detail view keys
 		switch msg.String() {
 		case "q", "esc":
 			app.currentView = viewIssues
@@ -83,6 +125,8 @@ func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 			}
 		case "c":
 			dv.StartComment()
+		case "t":
+			dv.StartLogTime()
 		case "m":
 			if dv.issue != nil {
 				return dv, app.showTransitions(dv.issue.Key)
@@ -155,6 +199,15 @@ func (dv DetailView) View(width, height int) string {
 		lines = append(lines, helpDescStyle.Render("Posting comment..."))
 	}
 
+	// Time logging input or sent indicator
+	if dv.logging {
+		lines = append(lines, "")
+		lines = append(lines, searchPromptStyle.Render("Log time (e.g. 2h, 30m): ")+dv.logBuf+"█")
+	} else if dv.logSent {
+		lines = append(lines, "")
+		lines = append(lines, helpDescStyle.Render("Time logged"))
+	}
+
 	// Apply scroll
 	if dv.scrollY > 0 && dv.scrollY < len(lines) {
 		lines = lines[dv.scrollY:]
@@ -165,7 +218,7 @@ func (dv DetailView) View(width, height int) string {
 
 	content := strings.Join(lines, "\n")
 
-	footer := statusBarStyle.Render("esc:back  ?:help")
+	footer := statusBarStyle.Render("esc:back  o:browser  a:assign  c:comment  t:log  m:move  ?:help")
 	return lipgloss.JoinVertical(lipgloss.Left,
 		panelStyle.Width(width-2).Render(content),
 		footer,

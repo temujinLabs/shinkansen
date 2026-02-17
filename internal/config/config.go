@@ -11,9 +11,15 @@ type Config struct {
 	JiraURL        string `json:"jira_url"`
 	Email          string `json:"email"`
 	APIToken       string `json:"api_token"`
+	AccountID      string `json:"account_id,omitempty"`
 	DefaultProject string `json:"default_project,omitempty"`
 	DefaultBoard   int    `json:"default_board,omitempty"`
 	SyncInterval   int    `json:"sync_interval,omitempty"` // seconds, default 60
+}
+
+// BrowseURL returns the Jira web URL for an issue key.
+func (c *Config) BrowseURL(issueKey string) string {
+	return c.JiraURL + "/browse/" + issueKey
 }
 
 func configDir() (string, error) {

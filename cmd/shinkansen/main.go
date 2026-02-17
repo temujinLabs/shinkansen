@@ -89,9 +89,10 @@ func runLogin() error {
 	}
 
 	cfg := &config.Config{
-		JiraURL:  jiraURL,
-		Email:    email,
-		APIToken: token,
+		JiraURL:   jiraURL,
+		Email:     email,
+		APIToken:  token,
+		AccountID: user.AccountID,
 	}
 	if len(projects) > 0 {
 		cfg.DefaultProject = projects[0].Key

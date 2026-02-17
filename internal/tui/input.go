@@ -49,8 +49,15 @@ func (tp TransitionPicker) Update(msg tea.Msg, app *App) (TransitionPicker, tea.
 		case "enter":
 			if tp.cursor < len(tp.transitions) {
 				t := tp.transitions[tp.cursor]
-				key := tp.issueKey
 				tp.Hide()
+
+				// Check if this is a bulk operation
+				if app.selectionCount() > 0 {
+					return tp, app.doBulkTransition(t.ID)
+				}
+
+				// Single issue transition
+				key := tp.issueKey
 				return tp, func() tea.Msg {
 					app.client.TransitionIssue(key, t.ID)
 					return syncDoneMsg{result: cache.Sync(app.client, app.store, app.cfg.DefaultProject)}

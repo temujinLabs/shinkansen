@@ -87,3 +87,11 @@ func (c *Client) AssignIssue(key, accountID string) error {
 	_, err := c.do("PUT", fmt.Sprintf("/rest/api/3/issue/%s/assignee", url.PathEscape(key)), body)
 	return err
 }
+
+// LogWork adds a worklog entry to an issue.
+// timeSpent is a Jira duration string like "2h", "30m", "1d".
+func (c *Client) LogWork(key, timeSpent string) error {
+	body := map[string]string{"timeSpent": timeSpent}
+	_, err := c.do("POST", fmt.Sprintf("/rest/api/3/issue/%s/worklog", url.PathEscape(key)), body)
+	return err
+}

@@ -98,15 +98,27 @@ func (bv BoardView) Update(msg tea.Msg, app *App) (BoardView, tea.Cmd) {
 				app.currentView = viewDetail
 			}
 		case "m":
+			// Bulk move if selections exist
+			if app.selectionCount() > 0 {
+				for k := range app.selections {
+					return bv, app.showTransitions(k)
+				}
+			}
 			if issue := bv.SelectedIssue(); issue != nil {
 				return bv, app.showTransitions(issue.Key)
+			}
+		case "t":
+			if issue := bv.SelectedIssue(); issue != nil {
+				app.currentView = viewDetail
+				app.detail.SetIssue(issue)
+				app.detail.StartLogTime()
 			}
 		}
 	}
 	return bv, nil
 }
 
-func (bv BoardView) View(width, height int, active bool) string {
+func (bv BoardView) View(width, height int, active bool, selections map[string]bool) string {
 	title := panelTitleStyle.Render("Sprint Board")
 
 	colWidth := (width - 6) / len(bv.columns)
@@ -139,9 +151,16 @@ func (bv BoardView) View(width, height int, active bool) string {
 		visible := 0
 		for ri := startIdx; ri < len(col.issues) && visible < maxRows; ri++ {
 			issue := col.issues[ri]
-			line := fmt.Sprintf("  %s", issue.Key)
-			if len(issue.Fields.Summary) > colWidth-14 {
-				line += " " + issue.Fields.Summary[:colWidth-17] + "..."
+
+			// Selection indicator
+			check := " "
+			if selections[issue.Key] {
+				check = selectedCheckStyle.Render("●")
+			}
+
+			line := fmt.Sprintf(" %s %s", check, issue.Key)
+			if len(issue.Fields.Summary) > colWidth-16 {
+				line += " " + issue.Fields.Summary[:colWidth-19] + "..."
 			} else {
 				line += " " + issue.Fields.Summary
 			}
@@ -158,7 +177,6 @@ func (bv BoardView) View(width, height int, active bool) string {
 			rows = append(rows, helpDescStyle.Render(fmt.Sprintf("  +%d more ↓", remaining)))
 		}
 		if startIdx > 0 {
-			// Insert scroll-up indicator after the separator
 			rows = append(rows[:2], append([]string{helpDescStyle.Render(fmt.Sprintf("  ↑ %d above", startIdx))}, rows[2:]...)...)
 		}
 
