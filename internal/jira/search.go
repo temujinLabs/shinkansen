@@ -3,18 +3,20 @@ package jira
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 )
 
-func (c *Client) Search(jql string, startAt, maxResults int) (*SearchResult, error) {
-	params := url.Values{
-		"jql":        {jql},
-		"startAt":    {fmt.Sprintf("%d", startAt)},
-		"maxResults": {fmt.Sprintf("%d", maxResults)},
-		"fields":     {"summary,status,assignee,priority,issuetype,project,updated,sprint"},
+// Search calls POST /rest/api/3/search/jql (the new endpoint).
+// Pagination uses nextPageToken, not startAt.
+func (c *Client) Search(jql string, maxResults int, nextPageToken string) (*SearchResult, error) {
+	body := map[string]interface{}{
+		"jql":        jql,
+		"maxResults": maxResults,
+		"fields":     []string{"summary", "status", "assignee", "priority", "issuetype", "project", "updated", "sprint", "comment", "description", "reporter", "created"},
 	}
-	path := "/rest/api/3/search?" + params.Encode()
-	data, err := c.do("GET", path, nil)
+	if nextPageToken != "" {
+		body["nextPageToken"] = nextPageToken
+	}
+	data, err := c.do("POST", "/rest/api/3/search/jql", body)
 	if err != nil {
 		return nil, err
 	}
@@ -25,22 +27,21 @@ func (c *Client) Search(jql string, startAt, maxResults int) (*SearchResult, err
 	return &result, nil
 }
 
-// SearchAll pages through all results for a JQL query.
+// SearchAll pages through all results for a JQL query using token-based pagination.
 func (c *Client) SearchAll(jql string) ([]Issue, error) {
 	var all []Issue
-	startAt := 0
-	pageSize := 50
+	nextToken := ""
 
 	for {
-		result, err := c.Search(jql, startAt, pageSize)
+		result, err := c.Search(jql, 50, nextToken)
 		if err != nil {
 			return all, err
 		}
 		all = append(all, result.Issues...)
-		if startAt+len(result.Issues) >= result.Total {
+		if result.IsLast || result.NextPageToken == nil || *result.NextPageToken == "" {
 			break
 		}
-		startAt += len(result.Issues)
+		nextToken = *result.NextPageToken
 	}
 	return all, nil
 }

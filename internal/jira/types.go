@@ -1,6 +1,9 @@
 package jira
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Jira Cloud REST API v3 response types
 
@@ -42,15 +45,45 @@ type Sprint struct {
 }
 
 type Comment struct {
-	ID      string `json:"id"`
-	Author  User   `json:"author"`
-	Body    string `json:"body"`
-	Created string `json:"created"`
+	ID      string          `json:"id"`
+	Author  User            `json:"author"`
+	Body    json.RawMessage `json:"body"`
+	Created string          `json:"created"`
+}
+
+// BodyText extracts plain text from an ADF comment body.
+func (c *Comment) BodyText() string {
+	// Try ADF format first (v3 API returns this)
+	var doc struct {
+		Content []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(c.Body, &doc); err == nil {
+		var text string
+		for _, block := range doc.Content {
+			for _, inline := range block.Content {
+				text += inline.Text
+			}
+			text += "\n"
+		}
+		if text != "" {
+			return text[:len(text)-1] // trim trailing newline
+		}
+	}
+	// Fallback: try plain string
+	var s string
+	if err := json.Unmarshal(c.Body, &s); err == nil {
+		return s
+	}
+	return string(c.Body)
 }
 
 type IssueFields struct {
-	Summary     string    `json:"summary"`
-	Description string    `json:"description,omitempty"`
+	Summary     string          `json:"summary"`
+	Description json.RawMessage `json:"description,omitempty"`
 	Status      Status    `json:"status"`
 	Assignee    *User     `json:"assignee,omitempty"`
 	Reporter    *User     `json:"reporter,omitempty"`
@@ -72,6 +105,16 @@ type Issue struct {
 	Fields IssueFields `json:"fields"`
 }
 
+// DescriptionText extracts plain text from the ADF description.
+func (i *Issue) DescriptionText() string {
+	if len(i.Fields.Description) == 0 || string(i.Fields.Description) == "null" {
+		return ""
+	}
+	// Reuse the same ADF parsing as Comment.BodyText
+	c := &Comment{Body: i.Fields.Description}
+	return c.BodyText()
+}
+
 func (i *Issue) AssigneeName() string {
 	if i.Fields.Assignee != nil {
 		return i.Fields.Assignee.DisplayName
@@ -85,10 +128,15 @@ func (i *Issue) UpdatedTime() time.Time {
 }
 
 type SearchResult struct {
-	StartAt    int     `json:"startAt"`
-	MaxResults int     `json:"maxResults"`
-	Total      int     `json:"total"`
-	Issues     []Issue `json:"issues"`
+	// Legacy fields (agile API still returns these)
+	StartAt    int `json:"startAt,omitempty"`
+	MaxResults int `json:"maxResults,omitempty"`
+	Total      int `json:"total,omitempty"`
+	// New search/jql endpoint uses token-based pagination
+	NextPageToken *string `json:"nextPageToken"`
+	IsLast        bool    `json:"isLast,omitempty"`
+	// Common
+	Issues []Issue `json:"issues"`
 }
 
 type Transition struct {
@@ -143,10 +191,6 @@ type TypeRef struct {
 
 type UserRef struct {
 	AccountID string `json:"accountId"`
-}
-
-type AddCommentRequest struct {
-	Body string `json:"body"`
 }
 
 type TransitionRequest struct {

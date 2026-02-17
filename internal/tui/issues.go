@@ -38,14 +38,14 @@ func (il IssueList) Update(msg tea.Msg, app *App) (IssueList, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "j", "down":
+		case "down":
 			if il.cursor < len(il.issues)-1 {
 				il.cursor++
 				if il.cursor-il.offset >= il.maxVisible {
 					il.offset++
 				}
 			}
-		case "k", "up":
+		case "up":
 			if il.cursor > 0 {
 				il.cursor--
 				if il.cursor < il.offset {

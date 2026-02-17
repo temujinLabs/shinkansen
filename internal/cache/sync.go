@@ -16,16 +16,22 @@ type SyncResult struct {
 
 // Sync fetches updated issues from Jira and caches them.
 // Uses delta sync: only fetches issues updated since last sync.
-func Sync(client *jira.Client, store *Store) SyncResult {
+// projectKey scopes results to a specific project (e.g. "SCRUM").
+func Sync(client *jira.Client, store *Store, projectKey string) SyncResult {
 	start := time.Now()
 
-	// Build JQL with delta if we have a previous sync
-	jql := "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"
+	// Build JQL scoped to the configured project.
+	// Include unresolved issues + recently resolved (last 14 days) for Done column.
+	base := "(resolution = Unresolved OR resolutiondate >= -14d)"
+	if projectKey != "" {
+		base = fmt.Sprintf("project = %s AND (resolution = Unresolved OR resolutiondate >= -14d)", projectKey)
+	}
+	jql := base + " ORDER BY updated DESC"
+
 	lastSync, err := store.LastSync()
 	if err == nil && !lastSync.IsZero() {
-		// Delta sync — only fetch issues updated since last sync
 		since := lastSync.Format("2006-01-02 15:04")
-		jql = fmt.Sprintf("assignee = currentUser() AND updated >= '%s' ORDER BY updated DESC", since)
+		jql = fmt.Sprintf("%s AND updated >= '%s' ORDER BY updated DESC", base, since)
 	}
 
 	issues, err := client.SearchAll(jql)

@@ -51,7 +51,7 @@ func (sv SearchView) Update(msg tea.Msg, app *App) (SearchView, tea.Cmd) {
 					app.currentView = viewIssues
 					return sv, func() tea.Msg {
 						app.client.CreateIssue(projectKey, summary, "Task")
-						return syncDoneMsg{result: cache.Sync(app.client, app.store)}
+						return syncDoneMsg{result: cache.Sync(app.client, app.store, app.cfg.DefaultProject)}
 					}
 				}
 				return sv, nil

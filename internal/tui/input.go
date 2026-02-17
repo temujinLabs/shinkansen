@@ -38,11 +38,11 @@ func (tp TransitionPicker) Update(msg tea.Msg, app *App) (TransitionPicker, tea.
 		switch msg.String() {
 		case "esc":
 			tp.Hide()
-		case "j", "down":
+		case "down":
 			if tp.cursor < len(tp.transitions)-1 {
 				tp.cursor++
 			}
-		case "k", "up":
+		case "up":
 			if tp.cursor > 0 {
 				tp.cursor--
 			}
@@ -53,7 +53,7 @@ func (tp TransitionPicker) Update(msg tea.Msg, app *App) (TransitionPicker, tea.
 				tp.Hide()
 				return tp, func() tea.Msg {
 					app.client.TransitionIssue(key, t.ID)
-					return syncDoneMsg{result: cache.Sync(app.client, app.store)}
+					return syncDoneMsg{result: cache.Sync(app.client, app.store, app.cfg.DefaultProject)}
 				}
 			}
 		}
@@ -69,7 +69,10 @@ func (tp TransitionPicker) View(width, height int) string {
 	title := searchPromptStyle.Render(fmt.Sprintf("Move %s to:", tp.issueKey))
 	var options []string
 	for i, t := range tp.transitions {
-		line := fmt.Sprintf("  %s → %s", t.Name, t.To.Name)
+		line := fmt.Sprintf("  → %s", t.To.Name)
+		if t.Name != t.To.Name {
+			line = fmt.Sprintf("  %s → %s", t.Name, t.To.Name)
+		}
 		if i == tp.cursor {
 			line = selectedStyle.Render(line)
 		}

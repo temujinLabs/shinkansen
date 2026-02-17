@@ -13,6 +13,8 @@ type BoardView struct {
 	columns    []boardColumn
 	colCursor  int
 	rowCursor  int
+	rowOffset  int
+	maxVisible int
 }
 
 type boardColumn struct {
@@ -64,24 +66,32 @@ func (bv BoardView) Update(msg tea.Msg, app *App) (BoardView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "j", "down":
+		case "down":
 			col := bv.columns[bv.colCursor]
 			if bv.rowCursor < len(col.issues)-1 {
 				bv.rowCursor++
+				if bv.maxVisible > 0 && bv.rowCursor-bv.rowOffset >= bv.maxVisible {
+					bv.rowOffset++
+				}
 			}
-		case "k", "up":
+		case "up":
 			if bv.rowCursor > 0 {
 				bv.rowCursor--
+				if bv.rowCursor < bv.rowOffset {
+					bv.rowOffset--
+				}
 			}
 		case "tab":
 			bv.colCursor = (bv.colCursor + 1) % len(bv.columns)
 			bv.rowCursor = 0
+			bv.rowOffset = 0
 		case "shift+tab":
 			bv.colCursor--
 			if bv.colCursor < 0 {
 				bv.colCursor = len(bv.columns) - 1
 			}
 			bv.rowCursor = 0
+			bv.rowOffset = 0
 		case "enter":
 			if issue := bv.SelectedIssue(); issue != nil {
 				app.detail.SetIssue(issue)
@@ -102,6 +112,12 @@ func (bv BoardView) View(width, height int, active bool) string {
 	colWidth := (width - 6) / len(bv.columns)
 	var cols []string
 
+	maxRows := height - 6
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	bv.maxVisible = maxRows
+
 	for ci, col := range bv.columns {
 		header := lipgloss.NewStyle().
 			Bold(true).
@@ -114,13 +130,15 @@ func (bv BoardView) View(width, height int, active bool) string {
 		rows = append(rows, header)
 		rows = append(rows, strings.Repeat("─", colWidth))
 
-		maxRows := height - 6
-		for ri, issue := range col.issues {
-			if ri >= maxRows {
-				rows = append(rows, helpDescStyle.Render(fmt.Sprintf("  +%d more", len(col.issues)-maxRows)))
-				break
-			}
+		// Apply scroll offset only to the active column
+		startIdx := 0
+		if ci == bv.colCursor {
+			startIdx = bv.rowOffset
+		}
 
+		visible := 0
+		for ri := startIdx; ri < len(col.issues) && visible < maxRows; ri++ {
+			issue := col.issues[ri]
 			line := fmt.Sprintf("  %s", issue.Key)
 			if len(issue.Fields.Summary) > colWidth-14 {
 				line += " " + issue.Fields.Summary[:colWidth-17] + "..."
@@ -132,6 +150,16 @@ func (bv BoardView) View(width, height int, active bool) string {
 				line = selectedStyle.Width(colWidth).Render(line)
 			}
 			rows = append(rows, line)
+			visible++
+		}
+
+		remaining := len(col.issues) - (startIdx + visible)
+		if remaining > 0 {
+			rows = append(rows, helpDescStyle.Render(fmt.Sprintf("  +%d more ↓", remaining)))
+		}
+		if startIdx > 0 {
+			// Insert scroll-up indicator after the separator
+			rows = append(rows[:2], append([]string{helpDescStyle.Render(fmt.Sprintf("  ↑ %d above", startIdx))}, rows[2:]...)...)
 		}
 
 		cols = append(cols, strings.Join(rows, "\n"))

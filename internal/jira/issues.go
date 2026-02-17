@@ -62,9 +62,23 @@ func (c *Client) TransitionIssue(key, transitionID string) error {
 	return err
 }
 
-func (c *Client) AddComment(key, body string) error {
-	req := AddCommentRequest{Body: body}
-	_, err := c.do("POST", fmt.Sprintf("/rest/api/3/issue/%s/comment", url.PathEscape(key)), req)
+func (c *Client) AddComment(key, text string) error {
+	// Jira Cloud v3 requires Atlassian Document Format (ADF) for comment bodies
+	body := map[string]interface{}{
+		"body": map[string]interface{}{
+			"version": 1,
+			"type":    "doc",
+			"content": []map[string]interface{}{
+				{
+					"type": "paragraph",
+					"content": []map[string]interface{}{
+						{"type": "text", "text": text},
+					},
+				},
+			},
+		},
+	}
+	_, err := c.do("POST", fmt.Sprintf("/rest/api/3/issue/%s/comment", url.PathEscape(key)), body)
 	return err
 }
 

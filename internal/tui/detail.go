@@ -11,10 +11,11 @@ import (
 )
 
 type DetailView struct {
-	issue      *jira.Issue
-	scrollY    int
-	commenting bool
-	commentBuf string
+	issue       *jira.Issue
+	scrollY     int
+	commenting  bool
+	commentBuf  string
+	commentSent bool
 }
 
 func NewDetailView() DetailView {
@@ -44,9 +45,15 @@ func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 					key := dv.issue.Key
 					dv.commenting = false
 					dv.commentBuf = ""
+					dv.commentSent = true
 					return dv, func() tea.Msg {
 						app.client.AddComment(key, comment)
-						return syncDoneMsg{result: cache.Sync(app.client, app.store)}
+						// Fetch the individual issue to get updated comments
+						issue, err := app.client.GetIssue(key)
+						if err == nil {
+							app.store.UpsertIssue(issue)
+						}
+						return syncDoneMsg{result: cache.Sync(app.client, app.store, app.cfg.DefaultProject)}
 					}
 				}
 				dv.commenting = false
@@ -68,9 +75,9 @@ func (dv DetailView) Update(msg tea.Msg, app *App) (DetailView, tea.Cmd) {
 		switch msg.String() {
 		case "q", "esc":
 			app.currentView = viewIssues
-		case "j", "down":
+		case "down":
 			dv.scrollY++
-		case "k", "up":
+		case "up":
 			if dv.scrollY > 0 {
 				dv.scrollY--
 			}
@@ -109,10 +116,10 @@ func (dv DetailView) View(width, height int) string {
 	lines = append(lines, detailLabelStyle.Render("Updated:")+" "+detailValueStyle.Render(i.Fields.Updated))
 	lines = append(lines, "")
 
-	if i.Fields.Description != "" {
+	desc := i.DescriptionText()
+	if desc != "" {
 		lines = append(lines, detailLabelStyle.Render("Description:"))
-		// Wrap long descriptions
-		descLines := strings.Split(i.Fields.Description, "\n")
+		descLines := strings.Split(desc, "\n")
 		for _, dl := range descLines {
 			if len(dl) > width-6 {
 				for len(dl) > width-6 {
@@ -135,14 +142,17 @@ func (dv DetailView) View(width, height int) string {
 		for _, c := range i.Fields.Comment.Comments {
 			lines = append(lines, "")
 			lines = append(lines, fmt.Sprintf("  %s — %s", helpKeyStyle.Render(c.Author.DisplayName), helpDescStyle.Render(c.Created)))
-			lines = append(lines, "  "+c.Body)
+			lines = append(lines, "  "+c.BodyText())
 		}
 	}
 
-	// Comment input
+	// Comment input or sent indicator
 	if dv.commenting {
 		lines = append(lines, "")
 		lines = append(lines, searchPromptStyle.Render("Add comment: ")+dv.commentBuf+"█")
+	} else if dv.commentSent {
+		lines = append(lines, "")
+		lines = append(lines, helpDescStyle.Render("Posting comment..."))
 	}
 
 	// Apply scroll
@@ -155,7 +165,7 @@ func (dv DetailView) View(width, height int) string {
 
 	content := strings.Join(lines, "\n")
 
-	footer := statusBarStyle.Render("esc:back  j/k:scroll  c:comment  m:move")
+	footer := statusBarStyle.Render("esc:back  ?:help")
 	return lipgloss.JoinVertical(lipgloss.Left,
 		panelStyle.Width(width-2).Render(content),
 		footer,

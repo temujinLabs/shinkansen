@@ -33,11 +33,12 @@ type App struct {
 	currentView view
 	activePanel int // 0 = issues, 1 = board
 
-	issues    IssueList
-	board     BoardView
-	detail    DetailView
-	search    SearchView
-	showHelp  bool
+	issues   IssueList
+	board    BoardView
+	detail   DetailView
+	search   SearchView
+	picker   TransitionPicker
+	showHelp bool
 
 	width  int
 	height int
@@ -79,7 +80,7 @@ func (a *App) tickCmd() tea.Cmd {
 }
 
 func (a *App) doSync() tea.Msg {
-	result := cache.Sync(a.client, a.store)
+	result := cache.Sync(a.client, a.store, a.cfg.DefaultProject)
 	return syncDoneMsg{result: result}
 }
 
@@ -90,6 +91,28 @@ func (a *App) loadFromCache() {
 	}
 	a.issues.SetIssues(issues)
 	a.board.SetIssues(issues)
+
+	// Refresh the detail view if it's showing an issue (so comments/status update)
+	if a.detail.issue != nil {
+		for i := range issues {
+			if issues[i].Key == a.detail.issue.Key {
+				a.detail.issue = &issues[i]
+				a.detail.commentSent = false
+				break
+			}
+		}
+	}
+}
+
+// isInputMode returns true when a text input is active and global keys should be suppressed.
+func (a *App) isInputMode() bool {
+	if a.currentView == viewSearch {
+		return true
+	}
+	if a.currentView == viewDetail && a.detail.commenting {
+		return true
+	}
+	return false
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -103,7 +126,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.syncing = false
 		if msg.result.Err != nil {
 			a.syncStatus = fmt.Sprintf("Sync failed: %v", msg.result.Err)
-			// Load from cache anyway
 			a.loadFromCache()
 		} else {
 			a.syncStatus = fmt.Sprintf("Synced %d issues in %dms", msg.result.ItemsSynced, msg.result.Duration.Milliseconds())
@@ -112,20 +134,43 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case transitionsMsg:
+		a.picker.Show(msg.issueKey, msg.transitions)
+		return a, nil
+
 	case tickMsg:
 		a.syncing = true
 		a.syncStatus = "Syncing..."
 		return a, tea.Batch(a.doSync, a.tickCmd())
 
 	case tea.KeyMsg:
-		// Global keys
+		// Transition picker captures all input when visible
+		if a.picker.visible {
+			var cmd tea.Cmd
+			a.picker, cmd = a.picker.Update(msg, a)
+			return a, cmd
+		}
+
+		// In input mode (search, commenting), only ctrl+c quits; all else goes to the view
+		if a.isInputMode() {
+			if msg.String() == "ctrl+c" {
+				return a, tea.Quit
+			}
+			// Delegate directly to the active view
+			var cmd tea.Cmd
+			switch a.currentView {
+			case viewSearch:
+				a.search, cmd = a.search.Update(msg, a)
+			case viewDetail:
+				a.detail, cmd = a.detail.Update(msg, a)
+			}
+			return a, cmd
+		}
+
+		// Global keys (only active when NOT in input mode)
 		switch msg.String() {
 		case "q", "ctrl+c":
 			if a.currentView == viewDetail {
-				a.currentView = viewIssues
-				return a, nil
-			}
-			if a.currentView == viewSearch {
 				a.currentView = viewIssues
 				return a, nil
 			}
@@ -136,13 +181,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 
 		case "?":
-			if a.currentView != viewSearch {
-				a.showHelp = !a.showHelp
-				return a, nil
-			}
+			a.showHelp = !a.showHelp
+			return a, nil
 
 		case "r":
-			if a.currentView != viewSearch && a.currentView != viewDetail {
+			if a.currentView != viewDetail {
 				a.syncing = true
 				a.syncStatus = "Syncing..."
 				return a, a.doSync
@@ -155,26 +198,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-		case "h":
-			if a.currentView == viewIssues || a.currentView == viewBoard {
-				if a.activePanel == 1 {
+		case "left":
+			if a.currentView == viewBoard {
+				if a.board.colCursor > 0 {
+					a.board.colCursor--
+					a.board.rowCursor = 0
+					a.board.rowOffset = 0
+				} else {
 					a.activePanel = 0
 					a.currentView = viewIssues
 				}
 				return a, nil
 			}
+			if a.currentView == viewIssues {
+				return a, nil
+			}
 
-		case "l":
-			if a.currentView == viewIssues || a.currentView == viewBoard {
-				if a.activePanel == 0 {
-					a.activePanel = 1
-					a.currentView = viewBoard
+		case "right":
+			if a.currentView == viewIssues {
+				a.activePanel = 1
+				a.currentView = viewBoard
+				return a, nil
+			}
+			if a.currentView == viewBoard {
+				if a.board.colCursor < len(a.board.columns)-1 {
+					a.board.colCursor++
+					a.board.rowCursor = 0
+					a.board.rowOffset = 0
 				}
 				return a, nil
 			}
 		}
 
 		if a.showHelp {
+			a.showHelp = false
 			return a, nil
 		}
 	}
@@ -199,11 +256,17 @@ func (a *App) View() string {
 		return "Loading..."
 	}
 
+	// Transition picker overlay
+	if a.picker.visible {
+		return a.picker.View(a.width, a.height)
+	}
+
 	if a.showHelp {
 		return a.renderHelp()
 	}
 
-	header := titleStyle.Render("SHINKANSEN") + "  " +
+	hints := helpDescStyle.Render("enter:open  c:comment  m:move  ?:help")
+	header := titleStyle.Render("SHINKANSEN") + "  " + hints + "  " +
 		statusBarStyle.Render(a.syncStatus)
 
 	var content string
@@ -228,16 +291,15 @@ func (a *App) View() string {
 }
 
 func (a *App) renderFooter() string {
-	keys := "j/k:nav  h/l:panels  enter:detail  m:move  c:comment  n:new  /:search  r:sync  ?:help  q:quit"
-	return statusBarStyle.Render(keys)
+	return ""
 }
 
 func (a *App) renderHelp() string {
 	help := lipgloss.JoinVertical(lipgloss.Left,
-		detailHeaderStyle.Render("Shinkansen — Keyboard Shortcuts"),
+		detailHeaderStyle.Render("Shinkansen -- Keyboard Shortcuts"),
 		"",
-		helpKeyStyle.Render("j/k    ")+" "+helpDescStyle.Render("Navigate up/down"),
-		helpKeyStyle.Render("h/l    ")+" "+helpDescStyle.Render("Switch between panels"),
+		helpKeyStyle.Render("↑/↓    ")+" "+helpDescStyle.Render("Navigate up/down"),
+		helpKeyStyle.Render("←/→    ")+" "+helpDescStyle.Render("Switch between panels & columns"),
 		helpKeyStyle.Render("Enter  ")+" "+helpDescStyle.Render("Open issue detail"),
 		helpKeyStyle.Render("m      ")+" "+helpDescStyle.Render("Move issue (status transition)"),
 		helpKeyStyle.Render("c      ")+" "+helpDescStyle.Render("Add comment"),
