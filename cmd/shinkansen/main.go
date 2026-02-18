@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/temujinlabs/shinkansen/internal/cache"
@@ -56,6 +58,19 @@ func main() {
 	}
 }
 
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		cmd = exec.Command("open", url)
+	}
+	cmd.Start()
+}
+
 func runLogin() error {
 	var jiraURL, email, token string
 
@@ -65,7 +80,10 @@ func runLogin() error {
 	fmt.Print("Email: ")
 	fmt.Scanln(&email)
 
-	fmt.Print("API Token: ")
+	tokenURL := "https://id.atlassian.com/manage-profile/security/api-tokens"
+	fmt.Printf("Opening %s in your browser...\n", tokenURL)
+	openBrowser(tokenURL)
+	fmt.Print("API Token (paste from browser): ")
 	fmt.Scanln(&token)
 
 	if jiraURL == "" || email == "" || token == "" {
