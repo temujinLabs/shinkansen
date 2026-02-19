@@ -15,6 +15,7 @@ type BoardView struct {
 	rowCursor  int
 	rowOffset  int
 	maxVisible int
+	sprintName string // Current sprint name (if any)
 }
 
 type boardColumn struct {
@@ -36,6 +37,15 @@ func (bv *BoardView) SetIssues(issues []jira.Issue) {
 	// Reset columns
 	for i := range bv.columns {
 		bv.columns[i].issues = nil
+	}
+
+	// Detect active sprint name from issue data
+	bv.sprintName = ""
+	for _, issue := range issues {
+		if issue.Fields.Sprint != nil && issue.Fields.Sprint.State == "active" {
+			bv.sprintName = issue.Fields.Sprint.Name
+			break
+		}
 	}
 
 	for _, issue := range issues {
@@ -119,7 +129,11 @@ func (bv BoardView) Update(msg tea.Msg, app *App) (BoardView, tea.Cmd) {
 }
 
 func (bv BoardView) View(width, height int, active bool, selections map[string]bool) string {
-	title := panelTitleStyle.Render("Sprint Board")
+	titleText := "Sprint Board"
+	if bv.sprintName != "" {
+		titleText = bv.sprintName
+	}
+	title := panelTitleStyle.Render(titleText)
 
 	colWidth := (width - 6) / len(bv.columns)
 	var cols []string

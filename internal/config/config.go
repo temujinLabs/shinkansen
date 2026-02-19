@@ -15,6 +15,28 @@ type Config struct {
 	DefaultProject string `json:"default_project,omitempty"`
 	DefaultBoard   int    `json:"default_board,omitempty"`
 	SyncInterval   int    `json:"sync_interval,omitempty"` // seconds, default 60
+
+	// OAuth 2.0 (3LO) fields
+	AuthMethod    string `json:"auth_method,omitempty"`     // "api-token" or "oauth"
+	OAuthClientID string `json:"oauth_client_id,omitempty"` // from developer.atlassian.com
+	OAuthSecret   string `json:"oauth_secret,omitempty"`
+	AccessToken   string `json:"access_token,omitempty"`
+	RefreshToken  string `json:"refresh_token,omitempty"`
+	CloudID       string `json:"cloud_id,omitempty"`
+	TokenExpiry   string `json:"token_expiry,omitempty"` // RFC3339
+}
+
+// IsOAuth returns true if the config uses OAuth authentication.
+func (c *Config) IsOAuth() bool {
+	return c.AuthMethod == "oauth" && c.AccessToken != ""
+}
+
+// OAuthBaseURL returns the Atlassian API base URL for OAuth access.
+func (c *Config) OAuthBaseURL() string {
+	if c.CloudID != "" {
+		return "https://api.atlassian.com/ex/jira/" + c.CloudID
+	}
+	return c.JiraURL
 }
 
 // BrowseURL returns the Jira web URL for an issue key.

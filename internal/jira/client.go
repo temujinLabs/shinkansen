@@ -12,6 +12,7 @@ import (
 )
 
 type Client struct {
+	cfg        *config.Config
 	baseURL    string
 	email      string
 	token      string
@@ -29,7 +30,33 @@ func NewClient(baseURL, email, token string) *Client {
 	}
 }
 
+// NewClientFromConfig creates a client that uses the config for auth,
+// supporting both API token and OAuth authentication.
+func NewClientFromConfig(cfg *config.Config) *Client {
+	baseURL := cfg.JiraURL
+	if cfg.IsOAuth() {
+		baseURL = cfg.OAuthBaseURL()
+	}
+	return &Client{
+		cfg:     cfg,
+		baseURL: baseURL,
+		email:   cfg.Email,
+		token:   cfg.APIToken,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
 func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
+	// Auto-refresh OAuth token if expired
+	if c.cfg != nil && c.cfg.IsOAuth() && c.cfg.TokenExpired() {
+		if err := config.RefreshAccessToken(c.cfg); err != nil {
+			return nil, fmt.Errorf("token refresh: %w", err)
+		}
+		c.baseURL = c.cfg.OAuthBaseURL()
+	}
+
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -45,7 +72,11 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", config.BasicAuthHeader(c.email, c.token))
+	if c.cfg != nil {
+		req.Header.Set("Authorization", c.cfg.AuthHeader())
+	} else {
+		req.Header.Set("Authorization", config.BasicAuthHeader(c.email, c.token))
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 

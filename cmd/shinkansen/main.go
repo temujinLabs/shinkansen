@@ -18,6 +18,10 @@ var version = "dev"
 
 func main() {
 	loginCmd := flag.NewFlagSet("login", flag.ExitOnError)
+	oauthFlag := loginCmd.Bool("oauth", false, "Use OAuth 2.0 (3LO) instead of API token")
+	clientIDFlag := loginCmd.String("client-id", "", "OAuth client ID (from developer.atlassian.com)")
+	clientSecretFlag := loginCmd.String("client-secret", "", "OAuth client secret")
+
 	versionFlag := flag.Bool("version", false, "Print version")
 	flag.Parse()
 
@@ -28,7 +32,13 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		loginCmd.Parse(os.Args[2:])
-		if err := runLogin(); err != nil {
+		var err error
+		if *oauthFlag {
+			err = runOAuthLogin(*clientIDFlag, *clientSecretFlag)
+		} else {
+			err = runLogin()
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -41,7 +51,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	client := jira.NewClient(cfg.JiraURL, cfg.Email, cfg.APIToken)
+	// Use config-aware client (supports both API token and OAuth)
+	client := jira.NewClientFromConfig(cfg)
 
 	store, err := cache.NewStore()
 	if err != nil {
@@ -107,10 +118,11 @@ func runLogin() error {
 	}
 
 	cfg := &config.Config{
-		JiraURL:   jiraURL,
-		Email:     email,
-		APIToken:  token,
-		AccountID: user.AccountID,
+		JiraURL:    jiraURL,
+		Email:      email,
+		APIToken:   token,
+		AccountID:  user.AccountID,
+		AuthMethod: "api-token",
 	}
 	if len(projects) > 0 {
 		cfg.DefaultProject = projects[0].Key
@@ -121,5 +133,70 @@ func runLogin() error {
 	}
 
 	fmt.Println("Configuration saved. Run 'shinkansen' to start.")
+	return nil
+}
+
+func runOAuthLogin(clientID, clientSecret string) error {
+	if clientID == "" {
+		clientID = os.Getenv("SHINKANSEN_OAUTH_CLIENT_ID")
+	}
+	if clientSecret == "" {
+		clientSecret = os.Getenv("SHINKANSEN_OAUTH_SECRET")
+	}
+
+	if clientID == "" {
+		fmt.Print("OAuth Client ID (from developer.atlassian.com): ")
+		fmt.Scanln(&clientID)
+	}
+	if clientSecret == "" {
+		fmt.Print("OAuth Client Secret: ")
+		fmt.Scanln(&clientSecret)
+	}
+
+	if clientID == "" || clientSecret == "" {
+		return fmt.Errorf("client ID and secret are required")
+	}
+
+	fmt.Println("Starting OAuth 2.0 authorization flow...")
+	fmt.Println("A browser window will open for you to authorize Shinkansen.")
+
+	// Open browser for OAuth authorization
+	authURL := fmt.Sprintf("https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=%s&scope=%s&redirect_uri=%s&response_type=code&prompt=consent",
+		clientID,
+		"read%3Ajira-work+write%3Ajira-work+read%3Ajira-user+offline_access",
+		"http%3A%2F%2Flocalhost%3A8089%2Fcallback",
+	)
+	openBrowser(authURL)
+
+	cfg, err := config.OAuthFlow(clientID, clientSecret)
+	if err != nil {
+		return err
+	}
+
+	// Verify by fetching user info
+	client := jira.NewClientFromConfig(cfg)
+	user, err := client.GetMyself()
+	if err != nil {
+		return fmt.Errorf("authentication verification failed: %w", err)
+	}
+	fmt.Printf("Authenticated as: %s (%s)\n", user.DisplayName, user.EmailAddress)
+	cfg.AccountID = user.AccountID
+
+	// Detect projects
+	projects, err := client.GetProjects()
+	if err != nil {
+		fmt.Printf("Warning: could not fetch projects: %v\n", err)
+	} else {
+		fmt.Printf("Found %d projects\n", len(projects))
+		if len(projects) > 0 {
+			cfg.DefaultProject = projects[0].Key
+		}
+	}
+
+	if err := config.Save(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Println("OAuth configuration saved. Run 'shinkansen' to start.")
 	return nil
 }
