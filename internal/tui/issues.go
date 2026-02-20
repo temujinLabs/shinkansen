@@ -79,9 +79,6 @@ func (il IssueList) Update(msg tea.Msg, app *App) (IssueList, tea.Cmd) {
 				app.detail.SetIssue(issue)
 				app.detail.StartLogTime()
 			}
-		case "n":
-			app.currentView = viewSearch
-			app.search.StartCreate()
 		}
 	}
 	return il, nil

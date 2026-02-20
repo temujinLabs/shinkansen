@@ -21,6 +21,9 @@ const (
 	viewDetail
 	viewSearch
 	viewHelp
+	viewCreate
+	viewFilter
+	viewProjectPicker
 )
 
 // Messages
@@ -30,6 +33,9 @@ type assignDoneMsg struct{ issueKey string }
 type logWorkDoneMsg struct{ issueKey string }
 type bulkMoveDoneMsg struct{ count int }
 type statusMsg string
+type projectsFetchedMsg struct{ projects []jira.Project }
+type projectSwitchedMsg struct{ projectKey string }
+type filterAppliedMsg struct{ issues []jira.Issue }
 
 type App struct {
 	client *jira.Client
@@ -39,12 +45,15 @@ type App struct {
 	currentView view
 	activePanel int // 0 = issues, 1 = board
 
-	issues   IssueList
-	board    BoardView
-	detail   DetailView
-	search   SearchView
-	picker   TransitionPicker
-	showHelp bool
+	issues        IssueList
+	board         BoardView
+	detail        DetailView
+	search        SearchView
+	picker        TransitionPicker
+	create        CreateView
+	filter        FilterView
+	projectPicker ProjectPicker
+	showHelp      bool
 
 	// Selections for bulk operations
 	selections map[string]bool
@@ -60,16 +69,19 @@ type App struct {
 
 func NewApp(client *jira.Client, store *cache.Store, cfg *config.Config) *App {
 	return &App{
-		client:      client,
-		store:       store,
-		cfg:         cfg,
-		currentView: viewIssues,
-		issues:      NewIssueList(),
-		board:       NewBoardView(),
-		detail:      NewDetailView(),
-		search:      NewSearchView(),
-		selections:  make(map[string]bool),
-		syncStatus:  "Loading...",
+		client:        client,
+		store:         store,
+		cfg:           cfg,
+		currentView:   viewIssues,
+		issues:        NewIssueList(),
+		board:         NewBoardView(),
+		detail:        NewDetailView(),
+		search:        NewSearchView(),
+		create:        NewCreateView(),
+		filter:        NewFilterView(store),
+		projectPicker: NewProjectPicker(),
+		selections:    make(map[string]bool),
+		syncStatus:    "Loading...",
 	}
 }
 
@@ -123,6 +135,12 @@ func (a *App) isInputMode() bool {
 	if a.currentView == viewDetail && (a.detail.commenting || a.detail.logging) {
 		return true
 	}
+	if a.currentView == viewCreate {
+		return true
+	}
+	if a.currentView == viewFilter {
+		return true
+	}
 	return false
 }
 
@@ -161,6 +179,15 @@ func openBrowser(url string) error {
 	default:
 		return exec.Command("open", url).Start()
 	}
+}
+
+// fetchProjects fetches the list of available projects from Jira.
+func (a *App) fetchProjects() tea.Msg {
+	projects, err := a.client.GetProjects()
+	if err != nil {
+		return statusMsg(fmt.Sprintf("Failed to fetch projects: %v", err))
+	}
+	return projectsFetchedMsg{projects: projects}
 }
 
 // doBulkTransition moves all selected issues to a given transition.
@@ -217,6 +244,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.syncing = true
 		return a, a.doSync
 
+	case createDoneMsg:
+		a.flashMsg = fmt.Sprintf("Created %s", msg.issueKey)
+		a.syncing = true
+		return a, a.doSync
+
+	case createErrMsg:
+		a.flashMsg = fmt.Sprintf("Create failed: %v", msg.err)
+		return a, nil
+
+	case projectsFetchedMsg:
+		a.projectPicker.SetProjects(msg.projects)
+		return a, nil
+
+	case projectSwitchedMsg:
+		a.flashMsg = fmt.Sprintf("Switched to project %s", msg.projectKey)
+		a.cfg.DefaultProject = msg.projectKey
+		config.Save(a.cfg)
+		a.syncing = true
+		return a, a.doSync
+
+	case filterAppliedMsg:
+		a.issues.SetIssues(msg.issues)
+		a.board.SetIssues(msg.issues)
+		a.flashMsg = fmt.Sprintf("Filter: %d results", len(msg.issues))
+		return a, nil
+
 	case statusMsg:
 		a.flashMsg = string(msg)
 		return a, nil
@@ -235,7 +288,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-		// In input mode (search, commenting, logging), only ctrl+c quits
+		// Project picker captures all input when visible
+		if a.projectPicker.visible {
+			var cmd tea.Cmd
+			a.projectPicker, cmd = a.projectPicker.Update(msg, a)
+			return a, cmd
+		}
+
+		// In input mode (search, commenting, logging, create, filter), only ctrl+c quits
 		if a.isInputMode() {
 			if msg.String() == "ctrl+c" {
 				return a, tea.Quit
@@ -246,6 +306,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.search, cmd = a.search.Update(msg, a)
 			case viewDetail:
 				a.detail, cmd = a.detail.Update(msg, a)
+			case viewCreate:
+				a.create, cmd = a.create.Update(msg, a)
+			case viewFilter:
+				a.filter, cmd = a.filter.Update(msg, a)
 			}
 			return a, cmd
 		}
@@ -272,6 +336,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.syncing = true
 				a.syncStatus = "Syncing..."
 				return a, a.doSync
+			}
+
+		case "n":
+			if a.currentView != viewDetail {
+				a.currentView = viewCreate
+				a.create.Show()
+				return a, nil
+			}
+
+		case "f":
+			if a.currentView != viewDetail {
+				a.currentView = viewFilter
+				a.filter.Show()
+				return a, nil
+			}
+
+		case "p":
+			if a.currentView != viewDetail {
+				a.projectPicker.Show()
+				return a, a.fetchProjects
 			}
 
 		case "/":
@@ -407,6 +491,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.detail, cmd = a.detail.Update(msg, a)
 	case viewSearch:
 		a.search, cmd = a.search.Update(msg, a)
+	case viewCreate:
+		a.create, cmd = a.create.Update(msg, a)
+	case viewFilter:
+		a.filter, cmd = a.filter.Update(msg, a)
 	}
 	return a, cmd
 }
@@ -421,6 +509,11 @@ func (a *App) View() string {
 		return a.picker.View(a.width, a.height)
 	}
 
+	// Project picker overlay
+	if a.projectPicker.visible {
+		return a.projectPicker.View(a.width, a.height)
+	}
+
 	if a.showHelp {
 		return a.renderHelp()
 	}
@@ -432,7 +525,7 @@ func (a *App) View() string {
 		hints = helpKeyStyle.Render(fmt.Sprintf("[%d selected]", selCount)) + "  " +
 			helpDescStyle.Render("m:move all  space:toggle  esc:clear")
 	} else {
-		hints = helpDescStyle.Render("enter:open  o:browser  a:assign  m:move  t:log  ?:help")
+		hints = helpDescStyle.Render("enter:open  n:new  f:filter  p:project  o:browser  a:assign  m:move  ?:help")
 	}
 
 	status := a.syncStatus
@@ -452,6 +545,10 @@ func (a *App) View() string {
 		content = a.detail.View(a.width, contentHeight)
 	case viewSearch:
 		content = a.search.View(a.width, contentHeight)
+	case viewCreate:
+		content = a.create.View(a.width, contentHeight)
+	case viewFilter:
+		content = a.filter.View(a.width, contentHeight)
 	default:
 		// Side-by-side: issues | board
 		halfWidth := a.width/2 - 2
@@ -461,7 +558,7 @@ func (a *App) View() string {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	}
 
-	footer := helpDescStyle.Render("\u2191\u2193:nav  \u2190\u2192:move  enter:open  m:move  c:comment  t:log  /:search  ?:help  q:quit")
+	footer := helpDescStyle.Render("\u2191\u2193:nav  \u2190\u2192:move  enter:open  n:new  f:filter  p:project  /:search  ?:help  q:quit")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
@@ -479,6 +576,8 @@ func (a *App) renderHelp() string {
 		helpKeyStyle.Render("c        ")+" "+helpDescStyle.Render("Add comment"),
 		helpKeyStyle.Render("t        ")+" "+helpDescStyle.Render("Log time (e.g. 2h, 30m)"),
 		helpKeyStyle.Render("n        ")+" "+helpDescStyle.Render("Create new issue"),
+		helpKeyStyle.Render("f        ")+" "+helpDescStyle.Render("JQL filter (custom query)"),
+		helpKeyStyle.Render("p        ")+" "+helpDescStyle.Render("Switch project"),
 		helpKeyStyle.Render("Space    ")+" "+helpDescStyle.Render("Select/deselect issue (bulk ops)"),
 		helpKeyStyle.Render("/        ")+" "+helpDescStyle.Render("Fuzzy search"),
 		helpKeyStyle.Render("r        ")+" "+helpDescStyle.Render("Refresh / sync from Jira"),

@@ -95,3 +95,50 @@ func (c *Client) LogWork(key, timeSpent string) error {
 	_, err := c.do("POST", fmt.Sprintf("/rest/api/3/issue/%s/worklog", url.PathEscape(key)), body)
 	return err
 }
+
+// CreateIssueWithDetails creates an issue with full field support including priority and description.
+func (c *Client) CreateIssueWithDetails(projectKey, summary, issueType, priority, description string) (*Issue, error) {
+	fields := map[string]interface{}{
+		"project":   map[string]string{"key": projectKey},
+		"summary":   summary,
+		"issuetype": map[string]string{"name": issueType},
+	}
+	if priority != "" {
+		fields["priority"] = map[string]string{"name": priority}
+	}
+	if description != "" {
+		// Jira Cloud v3 requires ADF for description
+		fields["description"] = map[string]interface{}{
+			"version": 1,
+			"type":    "doc",
+			"content": []map[string]interface{}{
+				{
+					"type": "paragraph",
+					"content": []map[string]interface{}{
+						{"type": "text", "text": description},
+					},
+				},
+			},
+		}
+	}
+
+	body := map[string]interface{}{"fields": fields}
+	data, err := c.do("POST", "/rest/api/3/issue", body)
+	if err != nil {
+		return nil, err
+	}
+	var issue Issue
+	if err := json.Unmarshal(data, &issue); err != nil {
+		return nil, fmt.Errorf("parse created issue: %w", err)
+	}
+	return &issue, nil
+}
+
+// MoveToSprint moves an issue into a sprint using the Agile API.
+func (c *Client) MoveToSprint(sprintID int, issueKeys ...string) error {
+	body := map[string]interface{}{
+		"issues": issueKeys,
+	}
+	_, err := c.do("POST", fmt.Sprintf("/rest/agile/1.0/sprint/%d/issue", sprintID), body)
+	return err
+}

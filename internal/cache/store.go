@@ -99,6 +99,12 @@ func (s *Store) migrate() error {
 		duration_ms INTEGER
 	);
 
+	CREATE TABLE IF NOT EXISTS jql_filters (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		jql TEXT NOT NULL,
+		used_at TEXT NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
 	CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_key);
 	CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee);
@@ -238,6 +244,49 @@ func (s *Store) GetTransitions(issueKey string) ([]jira.Transition, error) {
 		transitions = append(transitions, t)
 	}
 	return transitions, nil
+}
+
+// SaveJQLFilter stores a JQL filter in the history, keeping only the last 5.
+func (s *Store) SaveJQLFilter(jql string) error {
+	// Insert the new filter
+	_, err := s.db.Exec(
+		"INSERT INTO jql_filters (jql, used_at) VALUES (?, ?)",
+		jql, time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return err
+	}
+
+	// Remove duplicates (keep only the most recent entry for the same JQL)
+	s.db.Exec(`DELETE FROM jql_filters WHERE id NOT IN (
+		SELECT MAX(id) FROM jql_filters GROUP BY jql
+	)`)
+
+	// Keep only the last 5
+	s.db.Exec(`DELETE FROM jql_filters WHERE id NOT IN (
+		SELECT id FROM jql_filters ORDER BY used_at DESC LIMIT 5
+	)`)
+
+	return nil
+}
+
+// GetJQLFilters returns the last 5 used JQL filters, most recent first.
+func (s *Store) GetJQLFilters() ([]string, error) {
+	rows, err := s.db.Query("SELECT jql FROM jql_filters ORDER BY used_at DESC LIMIT 5")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var filters []string
+	for rows.Next() {
+		var jql string
+		if err := rows.Scan(&jql); err != nil {
+			continue
+		}
+		filters = append(filters, jql)
+	}
+	return filters, nil
 }
 
 // LastSync returns the time of the last successful sync.
