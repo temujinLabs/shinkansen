@@ -81,6 +81,15 @@ func (c *Comment) BodyText() string {
 	return string(c.Body)
 }
 
+type TimeTracking struct {
+	OriginalEstimate         string `json:"originalEstimate,omitempty"`
+	RemainingEstimate        string `json:"remainingEstimate,omitempty"`
+	TimeSpent                string `json:"timeSpent,omitempty"`
+	OriginalEstimateSeconds  int    `json:"originalEstimateSeconds,omitempty"`
+	RemainingEstimateSeconds int    `json:"remainingEstimateSeconds,omitempty"`
+	TimeSpentSeconds         int    `json:"timeSpentSeconds,omitempty"`
+}
+
 type IssueFields struct {
 	Summary     string          `json:"summary"`
 	Description json.RawMessage `json:"description,omitempty"`
@@ -93,6 +102,7 @@ type IssueFields struct {
 	Created     string    `json:"created"`
 	Updated     string    `json:"updated"`
 	Sprint      *Sprint   `json:"sprint,omitempty"`
+	TimeTracking *TimeTracking `json:"timetracking,omitempty"`
 	Comment     *struct {
 		Comments []Comment `json:"comments"`
 	} `json:"comment,omitempty"`

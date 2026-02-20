@@ -443,23 +443,27 @@ func (a *App) View() string {
 	header := titleStyle.Render("SHINKANSEN") + "  " + hints + "  " +
 		statusBarStyle.Render(status)
 
+	// Reserve space: 1 header + 1 footer + 1 margin = 3 lines
+	contentHeight := a.height - 3
+
 	var content string
 	switch a.currentView {
 	case viewDetail:
-		content = a.detail.View(a.width, a.height-4)
+		content = a.detail.View(a.width, contentHeight)
 	case viewSearch:
-		content = a.search.View(a.width, a.height-4)
+		content = a.search.View(a.width, contentHeight)
 	default:
 		// Side-by-side: issues | board
 		halfWidth := a.width/2 - 2
-		contentHeight := a.height - 4
 
 		leftPanel := a.issues.View(halfWidth, contentHeight, a.activePanel == 0, a.selections)
 		rightPanel := a.board.View(halfWidth, contentHeight, a.activePanel == 1, a.selections)
 		content = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, content)
+	footer := helpDescStyle.Render("\u2191\u2193:nav  \u2190\u2192:move  enter:open  m:move  c:comment  t:log  /:search  ?:help  q:quit")
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
 
 func (a *App) renderHelp() string {

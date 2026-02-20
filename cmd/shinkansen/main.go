@@ -22,14 +22,9 @@ func main() {
 	clientIDFlag := loginCmd.String("client-id", "", "OAuth client ID (from developer.atlassian.com)")
 	clientSecretFlag := loginCmd.String("client-secret", "", "OAuth client secret")
 
-	versionFlag := flag.Bool("version", false, "Print version")
-	flag.Parse()
-
-	if *versionFlag {
-		fmt.Printf("shinkansen %s\n", version)
-		os.Exit(0)
-	}
-
+	// Handle subcommands BEFORE parsing global flags.
+	// Go's flag.Parse() processes os.Args[1:] and can conflict with
+	// subcommand-specific flags like --oauth, --client-id, --client-secret.
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		loginCmd.Parse(os.Args[2:])
 		var err error
@@ -43,6 +38,15 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+
+	// Only parse global flags when NOT in a subcommand
+	versionFlag := flag.Bool("version", false, "Print version")
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("shinkansen %s\n", version)
+		os.Exit(0)
 	}
 
 	cfg, err := config.Load()

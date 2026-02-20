@@ -158,6 +158,22 @@ func (dv DetailView) View(width, height int) string {
 	}
 	lines = append(lines, detailLabelStyle.Render("Project:")+" "+detailValueStyle.Render(i.Fields.Project.Name))
 	lines = append(lines, detailLabelStyle.Render("Updated:")+" "+detailValueStyle.Render(i.Fields.Updated))
+
+	if i.Fields.TimeTracking != nil {
+		var timeParts []string
+		if i.Fields.TimeTracking.TimeSpent != "" {
+			timeParts = append(timeParts, "Spent: "+i.Fields.TimeTracking.TimeSpent)
+		}
+		if i.Fields.TimeTracking.OriginalEstimate != "" {
+			timeParts = append(timeParts, "Estimate: "+i.Fields.TimeTracking.OriginalEstimate)
+		}
+		if i.Fields.TimeTracking.RemainingEstimate != "" {
+			timeParts = append(timeParts, "Remaining: "+i.Fields.TimeTracking.RemainingEstimate)
+		}
+		if len(timeParts) > 0 {
+			lines = append(lines, detailLabelStyle.Render("Time Logged:")+" "+detailValueStyle.Render(strings.Join(timeParts, "  |  ")))
+		}
+	}
 	lines = append(lines, "")
 
 	desc := i.DescriptionText()
