@@ -1,0 +1,16 @@
+# Compiled binaries
+shinkansen
+shinkansen-*
+*.exe
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+vendor/
