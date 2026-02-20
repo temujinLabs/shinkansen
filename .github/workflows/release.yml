@@ -61,5 +61,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: Shinkansen ${{ github.ref_name }}
           files: shinkansen-*
           generate_release_notes: true

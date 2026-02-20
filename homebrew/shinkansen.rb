@@ -2,7 +2,7 @@ class Shinkansen < Formula
   desc "Keyboard-driven TUI for Jira. Fast as a bullet train."
   homepage "https://github.com/temujinlabs/shinkansen"
   url "https://github.com/temujinlabs/shinkansen/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 ""
+  sha256 "TODO_REPLACE_WITH_SHA256_AFTER_RELEASE"
   license "MIT"
 
   depends_on "go" => :build
